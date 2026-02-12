@@ -1,16 +1,17 @@
 import sqlite3
-from werkzeug.security import check_password_hash
-
+from datetime import datetime
+from flask import current_app
 connection = None
 cursor = None
 
 #database connection, table creation
 def connect_to_db():
     global connection, cursor
-    connection = sqlite3.connect('user-tasks.db',check_same_thread=False)
+    db = current_app.config['DB_NAME']
+    connection = sqlite3.connect(db, check_same_thread=False)
     cursor = connection.cursor()
     cursor.execute('create table if not exists users (id integer primary key autoincrement, email text unique, password text)')
-    cursor.execute('create table if not exists tasks (id integer primary key autoincrement, user_id integer, title text, completed integer)')
+    cursor.execute('create table if not exists tasks (id integer primary key autoincrement, user_id integer, title text, completed integer, created_at text)')
 
 #add user to DB, pass True if got added, othwerwise false
 def register_user(email, password):
@@ -22,19 +23,17 @@ def register_user(email, password):
             return False
     
 #login user, pass None if not found, True if password matches. otherwise False
-def login_user(email, password):
-    cursor.execute('select password from users where email = ?', (email,))
+def login_user(email):
+    cursor.execute('select * from users where email = ?', (email,))
     row = cursor.fetchone()
     if not row:
         return None
-    if check_password_hash(row[0], password):
-        return True
-    return False   
+    return ({'id': row[0], 'email': row[1], 'password': row[2]})   
 
 #add task to DB, return rowcount of added rows
 def add_task(email, title, completed = 0):
     id = get_user_id(email)
-    cursor.execute('insert into tasks(user_id, title, completed) values(?, ?, ?)', (id, title, completed))
+    cursor.execute('insert into tasks(user_id, title, completed, created_at) values(?, ?, ?, ?)', (id, title, completed, datetime.now().isoformat()))
     connection.commit()
     return cursor.rowcount
 
@@ -59,10 +58,21 @@ def get_tasks(email):
     tasks= []
     try:
         for data in cursor.execute('select * from tasks where user_id = ?', (user_id,)):
-            tasks.append({'id': data[0], "user_id": data[1], "title": data[2], 'completed': data[3] })
+            tasks.append({'id': data[0], "user_id": data[1], "title": data[2], 'completed': data[3], "created_at": data[4] })
         return tasks
     except:
         return []   
+    
+#get tasks with pagination
+def get_tasks_pagination(email, page, limit):
+    user_id = get_user_id(email)
+    offset = (page - 1) * limit
+    tasks = []
+    for data in cursor.execute('select * from tasks where user_id=? limit ? offset ?', (user_id, limit,offset)):
+        tasks.append({'id': data[0], 'title': data[1], 'user_id': data[2], 'completed': data[3], 'created_at': data[4]})
+    return tasks;    
+
+        
 
 #get one task for user    
 def get_task(email, id):
@@ -71,7 +81,7 @@ def get_task(email, id):
     data = cursor.fetchone()
     if data is None:
         return None
-    return ({'id': data[0], "user_id": data[1], "title": data[2], 'completed': data[3] })   
+    return ({'id': data[0], "user_id": data[1], "title": data[2], 'completed': data[3], 'created_at': data[4] })   
 
 #get all users present
 def get_users():
